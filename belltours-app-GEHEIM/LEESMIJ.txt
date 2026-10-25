@@ -1,0 +1,18 @@
+BELL TOURS-APP – DE SLEUTELS (geheim)
+
+Bewaar deze map goed (bv. op een USB-stick en in een kluis of een wachtwoordbeheerder) en zet ze NOOIT op GitHub
+of in de map belltours-app. Wie deze bestanden heeft, kan een app maken die zich voordoet als de app van Bell Tours.
+
+Wat je ermee doet (zie belltours-app/LEESMIJ.md):
+
+  ANDROID_KEYSTORE_B64.txt        de inhoud plakken in het geheim ANDROID_KEYSTORE_B64 op GitHub (deel B)
+  ANDROID_KEYSTORE_PASSWORD.txt   de inhoud plakken in het geheim ANDROID_KEYSTORE_PASSWORD op GitHub (deel B)
+  APPLE_CERT_KEY_B64.txt          de inhoud plakken in het geheim APPLE_CERT_KEY_B64 op GitHub (deel C, stap 5)
+  apple-distribution.csr          bij Apple opladen om het certificaat te maken (deel C, stap 1; elk jaar opnieuw, deel E)
+
+  belltours-android.keystore      de sleutel van de Android-app (dezelfde als in ANDROID_KEYSTORE_B64.txt).
+                                  Kwijt = een nieuwe versie kan niet meer over de oude: de chauffeurs moeten de app eerst verwijderen.
+  apple-distribution.key          de sleutel van het Apple-certificaat (dezelfde als in APPLE_CERT_KEY_B64.txt)
+
+Eens de geheimen op GitHub staan, heb je deze map enkel nog nodig om ze opnieuw in te stellen (bv. een nieuwe repository)
+en elk jaar voor apple-distribution.csr.

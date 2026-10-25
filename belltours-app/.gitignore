@@ -1,0 +1,19 @@
+# door de build gemaakt (GitHub maakt ze telkens opnieuw)
+node_modules/
+android/
+ios/
+build/
+out/
+capacitor.config.json
+www/error.html
+# geheimen horen NOOIT in deze map: ze staan bij de geheimen van GitHub (LEESMIJ.md)
+*.keystore
+*.jks
+*.key
+*.p12
+*.pem
+GEHEIM*/
+*_B64.txt
+*_PASSWORD.txt
+.DS_Store
+Thumbs.db

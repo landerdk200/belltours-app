@@ -1,0 +1,145 @@
+# De iPhone-app bouwen (Ad Hoc): Actions › "iPhone-app bouwen" › Run workflow. Het resultaat (BellTours-<versie>.ipa) staat onderaan de
+# run bij Artifacts; laad het op in de backoffice › Apps & QR-codes › Bell Tours-app. Uitleg: LEESMIJ.md, deel C.
+# Nodig: in de map apple/ het certificaat (.cer) en het Ad Hoc-profiel (.mobileprovision), en het geheim APPLE_CERT_KEY_B64.
+name: iPhone-app bouwen
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ios:
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Apple-bestanden nakijken
+        env:
+          KEY_B64: ${{ secrets.APPLE_CERT_KEY_B64 }}
+        run: |
+          if [ -z "$KEY_B64" ]; then echo "::error::Het geheim APPLE_CERT_KEY_B64 ontbreekt (Settings › Secrets and variables › Actions). Zie LEESMIJ.md, deel C."; exit 1; fi
+          CER=$(ls apple/*.cer 2>/dev/null | head -1)
+          PROF=$(ls apple/*.mobileprovision 2>/dev/null | head -1)
+          if [ -z "$CER" ]; then echo "::error::In de map apple/ staat geen certificaat (.cer). Zie LEESMIJ.md, deel C, stap 1."; exit 1; fi
+          if [ -z "$PROF" ]; then echo "::error::In de map apple/ staat geen profiel (.mobileprovision). Zie LEESMIJ.md, deel C, stap 4."; exit 1; fi
+          security cms -D -i "$PROF" > "$RUNNER_TEMP/profiel.plist"
+          PB=/usr/libexec/PlistBuddy
+          NAME=$($PB -c 'Print :Name' "$RUNNER_TEMP/profiel.plist")
+          UUID=$($PB -c 'Print :UUID' "$RUNNER_TEMP/profiel.plist")
+          TEAM=$($PB -c 'Print :TeamIdentifier:0' "$RUNNER_TEMP/profiel.plist")
+          APPID=$($PB -c 'Print :Entitlements:application-identifier' "$RUNNER_TEMP/profiel.plist")
+          DEV=$($PB -c 'Print :Entitlements:get-task-allow' "$RUNNER_TEMP/profiel.plist" 2>/dev/null || echo false)
+          TOT=$($PB -c 'Print :ExpirationDate' "$RUNNER_TEMP/profiel.plist")
+          N=$($PB -c 'Print :ProvisionedDevices' "$RUNNER_TEMP/profiel.plist" 2>/dev/null | grep -cE '^ +[0-9A-Fa-f-]{20,}$' || true)
+          case "$APPID" in
+            *.be.belltours.chauffeurs) ;;
+            *) echo "::error::Het profiel \"$NAME\" is voor $APPID, niet voor be.belltours.chauffeurs."; exit 1 ;;
+          esac
+          if [ "$DEV" = "true" ]; then echo "::error::\"$NAME\" is een Development-profiel. Maak een Ad Hoc-profiel (LEESMIJ.md, deel C, stap 4)."; exit 1; fi
+          if [ "$N" = "0" ]; then echo "::error::Het profiel \"$NAME\" heeft geen iPhones. Voeg de toestellen toe (LEESMIJ.md, deel C, stap 3)."; exit 1; fi
+          echo "Profiel: $NAME · team $TEAM · $N iPhone(s) · geldig tot $TOT"
+          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles" "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"
+          cp "$PROF" "$HOME/Library/MobileDevice/Provisioning Profiles/$UUID.mobileprovision"
+          cp "$PROF" "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles/$UUID.mobileprovision"
+          {
+            echo "PROFILE_NAME=$NAME"
+            echo "APPLE_TEAM_ID=$TEAM"
+            echo "CER=$CER"
+          } >> "$GITHUB_ENV"
+
+      - name: Certificaat in een tijdelijke sleutelhanger
+        env:
+          KEY_B64: ${{ secrets.APPLE_CERT_KEY_B64 }}
+        run: |
+          set -e
+          T="$RUNNER_TEMP"
+          echo "$KEY_B64" | base64 --decode > "$T/sleutel.pem"
+          /usr/bin/openssl x509 -inform DER -in "$CER" -out "$T/cert.pem" 2>/dev/null || /usr/bin/openssl x509 -in "$CER" -out "$T/cert.pem"
+          A=$(/usr/bin/openssl rsa -noout -modulus -in "$T/sleutel.pem" | /usr/bin/openssl md5)
+          B=$(/usr/bin/openssl x509 -noout -modulus -in "$T/cert.pem" | /usr/bin/openssl md5)
+          if [ "$A" != "$B" ]; then echo "::error::Het certificaat in apple/ hoort niet bij de sleutel APPLE_CERT_KEY_B64. Maak het certificaat met apple-distribution.csr (LEESMIJ.md, deel C, stap 1)."; exit 1; fi
+          P=$(/usr/bin/openssl rand -hex 16)
+          /usr/bin/openssl pkcs12 -export -inkey "$T/sleutel.pem" -in "$T/cert.pem" -out "$T/cert.p12" -passout "pass:$P" -name "Bell Tours" \
+            -keypbe PBE-SHA1-3DES -certpbe PBE-SHA1-3DES -macalg sha1
+          KC="$T/bt.keychain-db"
+          KP=$(/usr/bin/openssl rand -hex 16)
+          security create-keychain -p "$KP" "$KC"
+          security set-keychain-settings -lut 21600 "$KC"
+          security unlock-keychain -p "$KP" "$KC"
+          security import "$T/cert.p12" -P "$P" -A -t cert -f pkcs12 -k "$KC"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KP" "$KC" >/dev/null
+          security list-keychains -d user -s "$KC" $(security list-keychains -d user | sed 's/"//g')
+          security find-identity -v -p codesigning "$KC"
+          rm -f "$T/sleutel.pem" "$T/cert.p12"
+
+      - name: Installeren
+        run: npm ci --no-audit --no-fund
+
+      - name: Instellen (instellingen.json)
+        env:
+          BUILD_NUMBER: ${{ github.run_number }}
+        run: |
+          node scripts/configure.mjs
+          echo "VERSION=$(node -p "require('./build/info.json').version")" >> "$GITHUB_ENV"
+
+      - name: iOS-project maken
+        run: |
+          npx cap add ios --packagemanager SPM || true
+          test -d ios/App/CapApp-SPM
+          npx capacitor-assets generate --ios --iconBackgroundColor '#0e0d0b' --iconBackgroundColorDark '#0e0d0b' --splashBackgroundColor '#0e0d0b' --splashBackgroundColorDark '#0e0d0b'
+          node scripts/patch-native.mjs ios
+          npx cap sync ios
+
+      - name: Bouwen
+        run: |
+          set -o pipefail
+          xcodebuild -version
+          cd ios/App
+          xcodebuild -project App.xcodeproj -scheme App -configuration Release -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/App.xcarchive" archive | tail -60
+
+      - name: Exporteren (Ad Hoc)
+        run: |
+          set -e
+          maak() {
+            cat > "$RUNNER_TEMP/ExportOptions.plist" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>method</key><string>$1</string>
+            <key>teamID</key><string>$APPLE_TEAM_ID</string>
+            <key>signingStyle</key><string>manual</string>
+            <key>signingCertificate</key><string>Apple Distribution</string>
+            <key>provisioningProfiles</key><dict><key>be.belltours.chauffeurs</key><string>$PROFILE_NAME</string></dict>
+            <key>compileBitcode</key><false/>
+            <key>thinning</key><string>&lt;none&gt;</string>
+          </dict></plist>
+          EOF
+          }
+          maak release-testing
+          if ! xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/App.xcarchive" -exportPath "$RUNNER_TEMP/export" -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist"; then
+            maak ad-hoc
+            xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/App.xcarchive" -exportPath "$RUNNER_TEMP/export" -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist"
+          fi
+          mkdir -p out
+          cp "$RUNNER_TEMP"/export/*.ipa "out/BellTours-$VERSION.ipa"
+          ls -la out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BellTours-iPhone-${{ env.VERSION }}
+          path: out/*.ipa
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Sleutelhanger opruimen
+        if: always()
+        run: security delete-keychain "$RUNNER_TEMP/bt.keychain-db" 2>/dev/null || true

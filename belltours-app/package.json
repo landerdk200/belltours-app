@@ -1,0 +1,21 @@
+{
+  "name": "belltours-chauffeurs-app",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Bell Tours – de chauffeurs-app als app voor Android en iPhone, met de locatie in de achtergrond tijdens een dienst (grensovergangen).",
+  "license": "UNLICENSED",
+  "scripts": {
+    "configure": "node scripts/configure.mjs",
+    "patch": "node scripts/patch-native.mjs"
+  },
+  "dependencies": {
+    "@capacitor-community/background-geolocation": "1.2.26",
+    "@capacitor/android": "7.6.9",
+    "@capacitor/core": "7.6.9",
+    "@capacitor/ios": "7.6.9"
+  },
+  "devDependencies": {
+    "@capacitor/assets": "3.0.5",
+    "@capacitor/cli": "7.6.9"
+  }
+}

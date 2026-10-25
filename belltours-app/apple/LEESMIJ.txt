@@ -1,0 +1,5 @@
+Zet hier de twee bestanden van Apple (zie LEESMIJ.md, deel C):
+  - het certificaat:  distribution.cer         (Certificates › Apple Distribution, gemaakt met apple-distribution.csr)
+  - het profiel:      ....mobileprovision       (Profiles › Ad Hoc, voor be.belltours.chauffeurs, met de iPhones van de chauffeurs)
+Komt er een iPhone bij: het profiel opnieuw downloaden en hier het oude vervangen.
+Deze twee bestanden zijn niet geheim. De sleutel (apple-distribution.key) hoort NIET hier: die staat bij de geheimen van GitHub.
