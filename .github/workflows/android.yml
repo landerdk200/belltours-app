@@ -19,8 +19,7 @@ jobs:
         run: |
           MIS=""
           for f in package.json package-lock.json instellingen.json scripts/configure.mjs scripts/patch-native.mjs www/index.html www/error.template.html \
-                   assets/icon-only.png assets/icon-foreground.png assets/icon-background.png assets/splash.png assets/splash-dark.png \
-                   resources/android/drawable-mdpi/ic_stat_bt.png resources/android/drawable-xxxhdpi/ic_stat_bt.png; do
+                   assets/icon-only.png assets/icon-foreground.png assets/icon-background.png assets/splash.png assets/splash-dark.png; do
             [ -f "$f" ] || MIS="$MIS $f"
           done
           if [ -n "$MIS" ]; then
