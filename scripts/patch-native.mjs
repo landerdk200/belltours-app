@@ -5,6 +5,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+must(fs.existsSync('build/info.json'), 'build/info.json ontbreekt: eerst "node scripts/configure.mjs"');
 const info = JSON.parse(fs.readFileSync('build/info.json', 'utf8'));
 const which = process.argv[2];
 const read = (f) => fs.readFileSync(f, 'utf8');
@@ -29,13 +30,13 @@ if (which === 'android') {
       'android {\n' +
       '    signingConfigs {\n' +
       '        btRelease {\n' +
-      '            storeFile file(System.getenv("BT_KEYSTORE") ?: "release.keystore")\n' +
-      '            storePassword System.getenv("BT_KEYSTORE_PASSWORD")\n' +
-      '            keyAlias System.getenv("BT_KEY_ALIAS") ?: "belltours"\n' +
-      '            keyPassword System.getenv("BT_KEY_PASSWORD") ?: System.getenv("BT_KEYSTORE_PASSWORD")\n' +
+      '            storeFile = file(System.getenv("BT_KEYSTORE") ?: "release.keystore")\n' +
+      '            storePassword = System.getenv("BT_KEYSTORE_PASSWORD")?.trim()\n' +
+      '            keyAlias = System.getenv("BT_KEY_ALIAS") ?: "belltours"\n' +
+      '            keyPassword = (System.getenv("BT_KEY_PASSWORD") ?: System.getenv("BT_KEYSTORE_PASSWORD"))?.trim()\n' +
       '        }\n' +
       '    }\n' +
-      '    buildTypes { release { signingConfig signingConfigs.btRelease } }\n' +
+      '    buildTypes { release { signingConfig = signingConfigs.btRelease } }\n' +
       '}\n';
   }
   write(g, s);
@@ -46,6 +47,7 @@ if (which === 'android') {
   add('capacitor_background_geolocation_notification_channel_name', 'Bell Tours – in dienst');
   add('capacitor_background_geolocation_notification_icon', 'drawable/ic_stat_bt');
   write(st, x);
+  must(fs.existsSync('resources/android'), 'de map resources/android ontbreekt: laad de volledige map belltours-app op GitHub (LEESMIJ.md, deel A)');
   for (const d of fs.readdirSync('resources/android')) {
     const to = path.join('android/app/src/main/res', d);
     fs.mkdirSync(to, { recursive: true });

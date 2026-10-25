@@ -13,14 +13,28 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-node@v4
+      - name: Bestanden nakijken
+        run: |
+          MIS=""
+          for f in package.json package-lock.json instellingen.json scripts/configure.mjs scripts/patch-native.mjs www/index.html www/error.template.html \
+                   assets/icon-only.png assets/icon-foreground.png assets/icon-background.png assets/splash.png assets/splash-dark.png \
+                   resources/android/drawable-mdpi/ic_stat_bt.png resources/android/drawable-xxxhdpi/ic_stat_bt.png; do
+            [ -f "$f" ] || MIS="$MIS $f"
+          done
+          if [ -n "$MIS" ]; then
+            echo "::error::Deze bestanden ontbreken op GitHub:$MIS. Laad de volledige inhoud van de map belltours-app op, met de mappen (LEESMIJ.md, deel A)."
+            exit 1
+          fi
+          echo "Alle bestanden zijn er."
+
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: npm
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: 21
@@ -34,25 +48,41 @@ jobs:
             echo "::error::De geheimen ANDROID_KEYSTORE_B64 en ANDROID_KEYSTORE_PASSWORD ontbreken (Settings › Secrets and variables › Actions). Zie LEESMIJ.md, deel B."
             exit 1
           fi
-          echo "$KS_B64" | base64 --decode > "$RUNNER_TEMP/bt.keystore"
+          # spaties en regeleinden die mee gekopieerd werden (Kladblok, TextEdit) negeren
+          if ! printf '%s' "$KS_B64" | tr -d ' \t\r\n' | base64 --decode > "$RUNNER_TEMP/bt.keystore" 2>/dev/null; then
+            echo "::error::Het geheim ANDROID_KEYSTORE_B64 klopt niet: plak er opnieuw de volledige inhoud van ANDROID_KEYSTORE_B64.txt in (alles, niets anders). Zie LEESMIJ.md, deel B."
+            exit 1
+          fi
+          PW=$(printf '%s' "$KS_PW" | tr -d '\r\n')
+          if ! keytool -list -keystore "$RUNNER_TEMP/bt.keystore" -storetype PKCS12 -storepass "$PW" -alias belltours > /dev/null 2>&1; then
+            echo "::error::De sleutel en het wachtwoord passen niet bij elkaar: kijk de geheimen ANDROID_KEYSTORE_B64 en ANDROID_KEYSTORE_PASSWORD na (de inhoud van de twee bestanden uit de map GEHEIM, zonder spatie ervoor of erna). Zie LEESMIJ.md, deel B."
+            exit 1
+          fi
+          echo "Sleutel en wachtwoord: in orde"
           echo "BT_KEYSTORE=$RUNNER_TEMP/bt.keystore" >> "$GITHUB_ENV"
 
       - name: Installeren
-        run: npm ci --no-audit --no-fund
+        run: |
+          set -o pipefail
+          npm ci --no-audit --no-fund 2>&1 | tee "$RUNNER_TEMP/stap.log"
 
       - name: Instellen (instellingen.json)
         env:
           BUILD_NUMBER: ${{ github.run_number }}
         run: |
-          node scripts/configure.mjs
+          set -o pipefail
+          node scripts/configure.mjs 2>&1 | tee "$RUNNER_TEMP/stap.log"
           echo "VERSION=$(node -p "require('./build/info.json').version")" >> "$GITHUB_ENV"
 
       - name: Android-project maken
         run: |
-          npx cap add android
-          npx capacitor-assets generate --android --iconBackgroundColor '#0e0d0b' --iconBackgroundColorDark '#0e0d0b' --splashBackgroundColor '#0e0d0b' --splashBackgroundColorDark '#0e0d0b'
-          node scripts/patch-native.mjs android
-          npx cap sync android
+          set -o pipefail
+          {
+            npx cap add android
+            npx capacitor-assets generate --android --iconBackgroundColor '#0e0d0b' --iconBackgroundColorDark '#0e0d0b' --splashBackgroundColor '#0e0d0b' --splashBackgroundColorDark '#0e0d0b'
+            node scripts/patch-native.mjs android
+            npx cap sync android
+          } 2>&1 | tee "$RUNNER_TEMP/stap.log"
 
       - name: Bouwen
         env:
@@ -61,21 +91,42 @@ jobs:
         run: |
           cd android
           chmod +x gradlew
-          ./gradlew --no-daemon assembleRelease
+          set +e
+          ./gradlew --no-daemon --console=plain assembleRelease 2>&1 | tee "$RUNNER_TEMP/stap.log"
+          ST=${PIPESTATUS[0]}
+          if [ "$ST" != "0" ]; then
+            # de oorzaak bovenaan bij Annotations (anders enkel "exit code 1")
+            MSG=$(sed -n '/What went wrong:/,/^\* Try:/p' "$RUNNER_TEMP/stap.log" | grep -v -e 'What went wrong:' -e '^\* Try:' -e '^ *$' | head -12 | tr '\n' ' ' | cut -c1-1500)
+            if [ -n "$MSG" ]; then echo "::error title=Gradle::$MSG"; touch "$RUNNER_TEMP/gemeld"; fi
+            exit "$ST"
+          fi
 
       - name: Nakijken en klaarzetten
         run: |
-          APK=android/app/build/outputs/apk/release/app-release.apk
-          test -f "$APK"
-          SIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
-          "$SIGNER" verify --print-certs "$APK" | head -5
-          mkdir -p out
-          cp "$APK" "out/BellTours-$VERSION.apk"
-          ls -la out
+          set -o pipefail
+          {
+            APK=android/app/build/outputs/apk/release/app-release.apk
+            test -f "$APK" || { echo "Geen app-release.apk gevonden in android/app/build/outputs/apk/release/"; ls -R android/app/build/outputs 2>/dev/null | head -30; exit 1; }
+            SIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
+            "$SIGNER" verify --print-certs "$APK" > "$RUNNER_TEMP/certs.txt"
+            head -5 "$RUNNER_TEMP/certs.txt"
+            mkdir -p out
+            cp "$APK" "out/BellTours-$VERSION.apk"
+            ls -la out
+          } 2>&1 | tee "$RUNNER_TEMP/stap.log"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: BellTours-Android-${{ env.VERSION }}
           path: out/*.apk
           retention-days: 30
           if-no-files-found: error
+
+      # Mislukt? Dan de laatste regels van de stap die misliep bovenaan bij Annotations (anders staat daar enkel "exit code 1").
+      - name: Wat ging er mis?
+        if: failure()
+        run: |
+          if [ -s "$RUNNER_TEMP/stap.log" ] && [ ! -e "$RUNNER_TEMP/gemeld" ]; then
+            T=$(grep -v '^[[:space:]]*$' "$RUNNER_TEMP/stap.log" | tail -n 15 | cut -c1-300 | sed 's/%/%25/g; s/\r//g' | awk '{printf "%s%%0A", $0}')
+            echo "::error title=De laatste regels van de stap die misliep::$T"
+          fi

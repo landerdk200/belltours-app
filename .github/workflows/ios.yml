@@ -14,9 +14,23 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-node@v4
+      - name: Bestanden nakijken
+        run: |
+          MIS=""
+          for f in package.json package-lock.json instellingen.json scripts/configure.mjs scripts/patch-native.mjs www/index.html www/error.template.html \
+                   assets/icon-only.png assets/icon-foreground.png assets/icon-background.png assets/splash.png assets/splash-dark.png \
+                   resources/android/drawable-mdpi/ic_stat_bt.png resources/android/drawable-xxxhdpi/ic_stat_bt.png; do
+            [ -f "$f" ] || MIS="$MIS $f"
+          done
+          if [ -n "$MIS" ]; then
+            echo "::error::Deze bestanden ontbreken op GitHub:$MIS. Laad de volledige inhoud van de map belltours-app op, met de mappen (LEESMIJ.md, deel A)."
+            exit 1
+          fi
+          echo "Alle bestanden zijn er."
+
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: npm
@@ -61,7 +75,10 @@ jobs:
         run: |
           set -e
           T="$RUNNER_TEMP"
-          echo "$KEY_B64" | base64 --decode > "$T/sleutel.pem"
+          if ! printf '%s' "$KEY_B64" | tr -d ' \t\r\n' | base64 --decode > "$T/sleutel.pem" 2>/dev/null || ! grep -q "PRIVATE KEY" "$T/sleutel.pem"; then
+            echo "::error::Het geheim APPLE_CERT_KEY_B64 klopt niet: plak er opnieuw de volledige inhoud van APPLE_CERT_KEY_B64.txt in. Zie LEESMIJ.md, deel C, stap 5."
+            exit 1
+          fi
           /usr/bin/openssl x509 -inform DER -in "$CER" -out "$T/cert.pem" 2>/dev/null || /usr/bin/openssl x509 -in "$CER" -out "$T/cert.pem"
           A=$(/usr/bin/openssl rsa -noout -modulus -in "$T/sleutel.pem" | /usr/bin/openssl md5)
           B=$(/usr/bin/openssl x509 -noout -modulus -in "$T/cert.pem" | /usr/bin/openssl md5)
@@ -133,7 +150,7 @@ jobs:
           cp "$RUNNER_TEMP"/export/*.ipa "out/BellTours-$VERSION.ipa"
           ls -la out
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: BellTours-iPhone-${{ env.VERSION }}
           path: out/*.ipa
